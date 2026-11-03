@@ -64,7 +64,12 @@ export function getCredentials(
   env: NodeJS.ProcessEnv = process.env,
   getHeader?: (name: string) => string | undefined,
 ): PandoraCredentials | { error: string } {
-  const baseUrl = getBaseUrl(env);
+  let baseUrl: string;
+  try {
+    baseUrl = getBaseUrl(env);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
   if (getHeader) {
     const token = (getHeader(TOKEN_HEADER.toLowerCase()) ?? "").trim();
     if (!token) return { error: `Missing ${TOKEN_HEADER} header (gateway mode requires it).` };

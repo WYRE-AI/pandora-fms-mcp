@@ -388,7 +388,12 @@ async function main() {
   const transportType = process.env.MCP_TRANSPORT || "stdio";
 
   // Fail fast on bad configuration (before accepting any request).
-  const baseUrl = getBaseUrl(); // throws if PANDORA_BASE_URL is invalid
+  // In stdio mode an UNSET PANDORA_BASE_URL is allowed so the server can start and every
+  // tool returns a clear is_error (the CI canary relies on this). A set-but-invalid
+  // value, and any problem in http mode, still fails startup.
+  const baseUrlUnsetInStdio = transportType !== "http" && !(process.env.PANDORA_BASE_URL ?? "").trim();
+  const baseUrl = baseUrlUnsetInStdio ? undefined : getBaseUrl();
+  if (baseUrlUnsetInStdio) logger.warn("PANDORA_BASE_URL is not set; tools will return an error until it is configured.");
   const tiers = [...getEnabledTiers()]; // throws on an unknown tier name
   logger.info("Starting Pandora FMS MCP server", {
     transport: transportType,
