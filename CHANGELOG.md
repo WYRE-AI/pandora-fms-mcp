@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Security (round-4 re-review)
+- Release image is published to ghcr.io/wyre-ai/pandora-fms-mcp.
+- gitleaks allowlist narrowed from whole test/smoke paths to the specific fake fixture token.
+
 - Initial Pandora FMS / Pandora Open MCP server: 55 tiered tools (33 read, 14 write, 8 admin) over API v2 and the legacy api.php, Bearer-token auth.
 
 ### Security (round 4)

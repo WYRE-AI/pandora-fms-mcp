@@ -18,7 +18,7 @@ jobs:
     uses: WYRE-AI/reusable-workflows/.github/workflows/mcp-server-release.yml@2b0b056bd7544937e5cbd56cf2e1ff8a180a411f
     with:
       server-name: pandora-fms-mcp
-      image-name: ghcr.io/asachs01/pandora-fms-mcp
+      image-name: ghcr.io/wyre-ai/pandora-fms-mcp
     secrets: inherit
 
   # DEPLOY TEMPORARILY DISABLED.
