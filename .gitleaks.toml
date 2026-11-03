@@ -1,5 +1,5 @@
 # Extend the default gitleaks rules. Test fixtures and the smoke script use
-# obviously fake keys (test-token-..., smoke-token-...).
+# obviously fake keys (tok-SECRET-0123456789, env-token, hdr-token).
 [extend]
 useDefault = true
 
