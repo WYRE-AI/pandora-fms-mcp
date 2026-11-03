@@ -80,15 +80,41 @@ export function redactSecrets(text: string, secrets: string[]): string {
   return secrets.reduce((acc, secret) => (secret ? acc.split(secret).join("[REDACTED]") : acc), bearer);
 }
 
+export const MAX_MESSAGE_CHARS = 2000;
+
+/** Redact first, then truncate, so a secret split by the cut is never half-shown. */
+export function redactAndTruncate(text: string, secrets: string[]): string {
+  return redactSecrets(text, secrets).slice(0, MAX_MESSAGE_CHARS);
+}
+
+/** Redact every string in a (JSON) value, including object keys' values and array items. */
+export function redactData(data: unknown, secrets: string[]): unknown {
+  if (typeof data === "string") return redactSecrets(data, secrets);
+  if (Array.isArray(data)) return data.map((item) => redactData(item, secrets));
+  if (typeof data === "object" && data !== null) {
+    return Object.fromEntries(
+      Object.entries(data).map(([key, value]) => [redactSecrets(key, secrets), redactData(value, secrets)]),
+    );
+  }
+  return data;
+}
+
 function errorResult(kind: NonNullable<ApiResult["error"]>["kind"], message: string): ApiResult {
   return { ok: false, error: { kind, message } };
 }
 
-function getAgent(): Agent | undefined {
+const agentCache = new Map<string, Agent>();
+
+/** One undici Agent per CA path, reused across calls. */
+export function getAgent(): Agent | undefined {
   const certPath = process.env.PANDORA_CA_CERT_FILE;
   if (!certPath) return undefined;
+  const cached = agentCache.get(certPath);
+  if (cached) return cached;
   const ca = readFileSync(certPath, "utf8");
-  return new Agent({ connect: { ca } });
+  const agent = new Agent({ connect: { ca } });
+  agentCache.set(certPath, agent);
+  return agent;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +129,7 @@ function checkType(name: string, spec: ParamSpec, value: unknown): void {
     case "string":
       if (typeof value !== "string") fail("a string");
       if (spec.enum && !spec.enum.includes(value as string)) fail(`one of ${spec.enum.join(", ")}`);
+      if (spec.pattern && !new RegExp(spec.pattern).test(value as string)) fail(`a string matching ${spec.pattern}`);
       break;
     case "integer":
       if (typeof value !== "number" || !Number.isInteger(value)) fail("an integer");
@@ -200,10 +227,22 @@ function rejectSeparator(name: string, value: string): string {
   return value;
 }
 
+function rejectComma(name: string, value: string): string {
+  if (value.includes(",")) {
+    throw new InputError(`Invalid input "${name}": the "," character is not allowed in values.`);
+  }
+  return value;
+}
+
+/** Reject both separators in one positional value. */
+function checkValue(name: string, value: string): string {
+  return rejectComma(name, rejectSeparator(name, value));
+}
+
 function otherElements(field: OtherField, value: unknown): string[] {
   const name = field.param;
   if (value === undefined || value === null) {
-    return field.default !== undefined ? [rejectSeparator(name, field.default)] : [""];
+    return field.default !== undefined ? [checkValue(name, field.default)] : [""];
   }
   if (field.pairs) {
     const entries = Object.entries(value as Record<string, unknown>);
@@ -212,17 +251,18 @@ function otherElements(field: OtherField, value: unknown): string[] {
       if (key.includes(",")) {
         throw new InputError(`Invalid input "${name}": "," is not allowed in field names.`);
       }
+      rejectComma(name, text);
       return rejectSeparator(name, `${key},${text}`);
     });
   }
   if (Array.isArray(value)) {
-    const items = value.map((item) => rejectSeparator(name, scalar(item)));
+    const items = value.map((item) => checkValue(name, scalar(item)));
     return field.spread ? items : [items.join(field.join ?? ",")];
   }
   if (typeof value === "boolean") {
     return [value ? (field.trueValue ?? "1") : (field.falseValue ?? "0")];
   }
-  return [rejectSeparator(name, scalar(value))];
+  return [checkValue(name, scalar(value))];
 }
 
 /**
@@ -357,12 +397,12 @@ export async function execute(
         ? ((data as { message?: unknown; error?: unknown }).message ?? (data as { error?: unknown }).error ?? data)
         : data;
     const message = typeof detail === "string" ? detail : JSON.stringify(detail);
-    return errorResult(kind, redactSecrets(`Pandora returned status ${response.status}: ${message}`.slice(0, 2000), secrets));
+    return errorResult(kind, redactAndTruncate(`Pandora returned status ${response.status}: ${message}`, secrets));
   }
 
   if (endpoint.api === "legacy") {
     const legacy = legacyError(data);
-    if (legacy !== undefined) return errorResult("upstream", redactSecrets(legacy, secrets));
+    if (legacy !== undefined) return errorResult("upstream", redactAndTruncate(legacy, secrets));
   }
-  return { ok: true, data: typeof data === "string" ? redactSecrets(data, secrets) : data };
+  return { ok: true, data: redactData(data, secrets) };
 }

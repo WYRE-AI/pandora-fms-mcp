@@ -226,7 +226,7 @@ function body(schema: keyof typeof SCHEMAS, required: string[] = []): Record<str
 const PAGING: Record<string, ParamSpec> = {
   page: { type: "integer", optional: true, in: "query", minimum: 0, description: "Page number (0 = first page)." },
   sizePage: { type: "integer", optional: true, in: "query", minimum: 0, description: "Page size." },
-  sortField: { type: "string", optional: true, in: "query", description: "Field to sort by." },
+  sortField: { type: "string", optional: true, in: "query", pattern: "^[A-Za-z0-9_]+$", description: "Field to sort by (letters, digits and underscore only)." },
   sortDirection: { type: "string", optional: true, in: "query", enum: ["ASC", "DESC"], description: "Sort direction." },
 };
 
@@ -748,7 +748,7 @@ export const ENDPOINTS: readonly EndpointSpec[] = [
     tool: "pandora_module_disable",
     op: "set",
     op2: "disable_module",
-    tier: "write",
+    tier: "admin",
     description: "⚠ DESTRUCTIVE Disable a module, given agent and module name; the module stops collecting data until re-enabled (legacy set/disable_module).",
     destructive: true,
     params: { agent_name: str("Agent name."), module_name: str("Module name.") },
@@ -771,7 +771,7 @@ export const ENDPOINTS: readonly EndpointSpec[] = [
     tool: "pandora_module_alerts_disable",
     op: "set",
     op2: "disable_module_alerts",
-    tier: "write",
+    tier: "admin",
     description: "⚠ DESTRUCTIVE Disable all the alerts of one module; no alerts will fire for it until re-enabled (legacy set/disable_module_alerts).",
     destructive: true,
     params: { agent_name: str("Agent name."), module_name: str("Module name.") },
@@ -873,7 +873,7 @@ export const ENDPOINTS: readonly EndpointSpec[] = [
     op: "set",
     op2: "update_agent_field",
     tier: "write",
-    description: "Update fields of an agent (legacy set/update_agent_field). Field names must not contain \",\"; no value may contain \"|\".",
+    description: "Update fields of an agent (legacy set/update_agent_field). Neither field names nor values may contain \",\"; no value may contain \"|\".",
     params: {
       agent: str("Agent id (or alias when use_alias is true)."),
       use_alias: bool("Treat agent as an alias.", true),

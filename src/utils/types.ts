@@ -12,6 +12,8 @@ export interface ParamSpec {
   description?: string;
   minimum?: number;
   maximum?: number;
+  /** string only: value must match this regular expression (anchored in the pattern). */
+  pattern?: string;
   /** v2 only: send as a query-string parameter instead of a JSON body field. */
   in?: "query";
   items?: { type: string; properties?: Record<string, ParamSpec> };

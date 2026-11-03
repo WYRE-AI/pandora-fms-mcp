@@ -3,7 +3,7 @@
  * Pandora FMS / Pandora Open MCP Server
  *
  * One MCP tool per endpoint of the Pandora FMS API v2 and the legacy
- * api.php. 33 read + 16 write + 6 admin = 55 tools. Tools are grouped by tier
+ * api.php. 33 read + 14 write + 8 admin = 55 tools. Tools are grouped by tier
  * (read | write | admin); only the tiers listed in PANDORA_TOOL_TIERS
  * (default "read") are listed or callable.
  *
@@ -56,6 +56,9 @@ const KNOWN_PLACEHOLDER_SECRETS = new Set([
   "s2s-secret",
 ]);
 
+/** Pattern placeholders such as "xxxxxxxx..." or "your-secret-here". */
+const PLACEHOLDER_PATTERN = /^(x+|0+|your[-_ ]?(s2s[-_ ])?secret.*|change[-_ ]?me.*|replace[-_ ]?(with|me).*)$/i;
+
 const LOOPBACK_HOST = "127.0.0.1";
 
 /** Per-request credentials in gateway mode (no cross-tenant leakage). */
@@ -97,7 +100,7 @@ function headerValue(value: string | string[] | undefined): string | undefined {
 }
 
 /** 127.0.0.1, the rest of 127.0.0.0/8, localhost, and ::1. */
-function isLoopbackBindHost(host: string): boolean {
+export function isLoopbackBindHost(host: string): boolean {
   const normalized = host.trim().toLowerCase().replace(/^\[(.+)\]$/, "$1");
   if (normalized === "localhost" || normalized === "::1") return true;
   const bare = normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : normalized;
@@ -113,11 +116,14 @@ function isLoopbackBindHost(host: string): boolean {
  * flag may bypass, and that bypass does not check X-Gateway-S2S.
  * The secret value is never written to logs.
  */
-function resolveS2sSecret(env: NodeJS.ProcessEnv = process.env): { secret: string; insecureDev: boolean } {
+export function resolveS2sSecret(env: NodeJS.ProcessEnv = process.env): { secret: string; insecureDev: boolean } {
   // SECURITY-REVIEW: S2S secret resolution (fail closed; dev bypass only when the secret is empty).
   const raw = (env.CONDUIT_S2S_SECRET ?? "").trim();
-  if (raw && KNOWN_PLACEHOLDER_SECRETS.has(raw.toLowerCase())) {
+  if (raw && (KNOWN_PLACEHOLDER_SECRETS.has(raw.toLowerCase()) || PLACEHOLDER_PATTERN.test(raw))) {
     refuseStart(PLACEHOLDER_S2S_SECRET_ERROR);
+  }
+  if (raw && raw.length < 32) {
+    refuseStart("Refusing to start HTTP transport: CONDUIT_S2S_SECRET must be at least 32 characters (openssl rand -hex 32).");
   }
   if (raw) return { secret: raw, insecureDev: false };
   if (env.MCP_ALLOW_INSECURE_DEV === "1") {
@@ -195,6 +201,42 @@ async function handleMcpRequest(
   res: ServerResponse,
   creds?: PandoraCredentials,
 ): Promise<void> {
+  // Bound buffering before handing a parsed body to the SDK (including chunked uploads).
+  let parsedBody: unknown;
+  if (req.method === "POST") {
+    const limit = 1024 * 1024;
+    const tooLarge = () => {
+      if (res.headersSent) return;
+      res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+      res.end(JSON.stringify({ error: "Request body exceeds 1 MiB" }));
+      req.resume();
+    };
+    if (Number(req.headers["content-length"]) > limit) {
+      tooLarge();
+      return;
+    }
+    try {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      // Early return must not destroy the socket before the 413 is flushed.
+      for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += buffer.length;
+        if (size > limit) {
+          tooLarge();
+          return;
+        }
+        chunks.push(buffer);
+      }
+      parsedBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      if (!res.headersSent) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON request body" }));
+      }
+      return;
+    }
+  }
   const server = createFreshServer();
   const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
 
@@ -206,9 +248,9 @@ async function handleMcpRequest(
   try {
     await server.connect(transport);
     if (creds) {
-      await requestCredentials.run(creds, () => transport.handleRequest(req, res));
+      await requestCredentials.run(creds, () => transport.handleRequest(req, res, parsedBody));
     } else {
-      await transport.handleRequest(req, res);
+      await transport.handleRequest(req, res, parsedBody);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -236,7 +278,11 @@ async function startStdioTransport(): Promise<void> {
  */
 export async function startHttpTransport(): Promise<HttpServer> {
   const { secret: s2sSecret, insecureDev } = resolveS2sSecret();
-  const port = parseInt(process.env.MCP_HTTP_PORT || "8080", 10);
+  const rawPort = process.env.MCP_HTTP_PORT ?? "8080";
+  if (!/^\d+$/.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) {
+    refuseStart("Refusing to start HTTP transport: MCP_HTTP_PORT must be an integer between 1 and 65535.");
+  }
+  const port = Number(rawPort);
   const host = resolveBindHost(s2sSecret);
   if (insecureDev) {
     // error level so LOG_LEVEL=warn|error cannot hide the bypass.
@@ -255,13 +301,33 @@ export async function startHttpTransport(): Promise<HttpServer> {
     }
   }
 
+  const checkHost = process.env.MCP_ALLOWED_HOSTS !== undefined || !s2sSecret || isLoopbackBindHost(host);
+  const configuredHosts = (process.env.MCP_ALLOWED_HOSTS ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+  for (const entry of configuredHosts) {
+    if (entry.includes(":") && !/^\[[0-9a-f:]+\]$/i.test(entry)) {
+      logger.warn(`MCP_ALLOWED_HOSTS entry "${entry}" contains a port or unbracketed IPv6 address and will never match.`);
+    }
+  }
+  const allowedHosts = new Set([
+    "localhost", "127.0.0.1", "[::1]",
+    ...configuredHosts.map((h) => h.toLowerCase()),
+  ]);
   const httpServer = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const url = new URL(req.url || "/", "http://localhost");
 
     // Shallow, unauthenticated liveness probe. Must NOT read credentials or call upstream.
     if (url.pathname === "/health" || url.pathname === "/healthz") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+
+    // Match the entire Host authority, allowing only an optional numeric port.
+    const authority = req.headers.host?.toLowerCase();
+    const hostMatch = authority?.match(/^(\[[0-9a-f:]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?$/);
+    if (checkHost && (!hostMatch || (hostMatch[2] !== undefined && (Number(hostMatch[2]) < 1 || Number(hostMatch[2]) > 65535)) || !allowedHosts.has(hostMatch[1]))) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Host not allowed" }));
       return;
     }
 

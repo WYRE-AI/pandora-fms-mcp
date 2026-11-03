@@ -230,11 +230,11 @@ describe("legacy API requests", () => {
     expect(new URL(buildLegacyRequest(legacy("pandora_agent_id_get"), { agent_names: ["a", "b"] }, credentials).url).searchParams.get("other")).toBe("a|b");
     expect(new URL(buildLegacyRequest(legacy("pandora_downtime_agents_add"), { id_downtime: 4, agent_ids: [1, 2, 3] }, credentials).url).searchParams.get("other")).toBe("1;2;3");
     const update = new URL(
-      buildLegacyRequest(legacy("pandora_agent_field_update"), { agent: "pandora", use_alias: false, fields: { id_os: "1", alias: "pandora", comentarios: "a,b" } }, credentials).url,
+      buildLegacyRequest(legacy("pandora_agent_field_update"), { agent: "pandora", use_alias: false, fields: { id_os: "1", alias: "pandora", comentarios: "ab" } }, credentials).url,
     );
     expect(update.searchParams.get("id")).toBe("pandora");
     expect(update.searchParams.get("id2")).toBe("0");
-    expect(update.searchParams.get("other")).toBe("id_os,1|alias,pandora|comentarios,a,b");
+    expect(update.searchParams.get("other")).toBe("id_os,1|alias,pandora|comentarios,ab");
   });
 
   it("maps booleans to 1/0 and error_value to a flag/value pair", () => {
@@ -332,5 +332,72 @@ describe("HTTP error handling, redirects and redaction", () => {
     const result = await execute(endpoint("pandora_event_get"), { idEvent: 1 }, credentials);
     expect(result).toMatchObject({ ok: false, error: { kind: "upstream" } });
     expect(result.error?.message).toContain("boom");
+  });
+});
+
+describe("round-4 hardening", () => {
+  it("redacts before truncating: a token straddling the 2000-char cut is not leaked", async () => {
+    const prefix = "Pandora returned status 500: ";
+    for (const offset of [1990, 1995, 1998]) {
+      const pad = "a".repeat(offset - prefix.length);
+      stubFetch(() => new Response(`${pad}${TOKEN}${"b".repeat(50)}`, { status: 500 }));
+      const result = await execute(endpoint("pandora_ping_get"), {}, credentials);
+      const message = result.error?.message ?? "";
+      expect(message.length).toBeLessThanOrEqual(2000);
+      expect(message).not.toContain(TOKEN);
+      expect(message).not.toContain(TOKEN.slice(0, 8));
+    }
+  });
+
+  it("redacts the token inside successful JSON responses", async () => {
+    stubFetch(() => jsonResponse({ note: `x ${TOKEN}`, nested: [{ a: `Bearer ${TOKEN}` }], n: 1 }));
+    const result = await execute(endpoint("pandora_ping_get"), {}, credentials);
+    expect(result.ok).toBe(true);
+    expect(JSON.stringify(result.data)).not.toContain(TOKEN);
+    expect(JSON.stringify(result.data)).toContain("[REDACTED]");
+    expect((result.data as { n: number }).n).toBe(1);
+  });
+
+  it("restricts sortField to [A-Za-z0-9_]+", async () => {
+    const mock = stubFetch(() => jsonResponse({}));
+    const bad = await execute(endpoint("pandora_event_get"), { idEvent: 1 }, credentials);
+    expect(bad.ok).toBe(true);
+    const list = ENDPOINTS.find((e) => e.api === "v2" && "sortField" in e.params);
+    if (!list) throw new Error("no endpoint with sortField");
+    const args = (field: string) => ({ ...Object.fromEntries(Object.entries(list.params).filter(([, s]) => !s.optional).map(([k]) => [k, 1])), sortField: field });
+    for (const field of ["a b", "x;DROP", "name,desc", "a&b=1", "", "é"]) {
+      const result = await execute(list, args(field), credentials);
+      expect(result).toMatchObject({ ok: false, error: { kind: "input" } });
+    }
+    mock.mockClear();
+    const ok = await execute(list, args("utimestamp_2"), credentials);
+    expect(ok.ok).toBe(true);
+  });
+
+  it("rejects ',' in legacy other values (scalars, array items, object values)", () => {
+    const find = (pred: (e: LegacyEndpoint) => boolean) => ENDPOINTS.find((e): e is LegacyEndpoint => e.api === "legacy" && pred(e))!;
+    const update = find((e) => e.tool === "pandora_agent_field_update");
+    expect(() => buildLegacyRequest(update, { agent: "1", fields: { alias: "a,b" } }, credentials)).toThrow(/","/);
+    expect(() => buildLegacyRequest(update, { agent: "1", fields: { alias: "ab" } }, credentials)).not.toThrow();
+    const scalarEp = find((e) => (e.other ?? []).some((f) => !f.pairs && !f.spread && !f.join) && Object.values(e.params).some((p) => p.type === "string"));
+    const field = scalarEp.other!.find((f) => !f.pairs && !f.spread && !f.join && scalarEp.params[f.param]?.type === "string")!;
+    const base = Object.fromEntries(Object.entries(scalarEp.params).filter(([, s]) => !s.optional).map(([k]) => [k, "v"]));
+    expect(() => buildLegacyRequest(scalarEp, { ...base, [field.param]: "a,b" }, credentials)).toThrow(/","/);
+  });
+
+  it("reuses one undici Agent per CA path", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { getAgent } = await import("../utils/client.js");
+    const dir = mkdtempSync(join(tmpdir(), "ca-"));
+    const path = join(dir, "ca.pem");
+    writeFileSync(path, "");
+    vi.stubEnv("PANDORA_CA_CERT_FILE", path);
+    const first = getAgent();
+    expect(first).toBeDefined();
+    expect(getAgent()).toBe(first);
+    vi.unstubAllEnvs();
+    expect(getAgent()).toBeUndefined();
   });
 });

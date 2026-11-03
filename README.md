@@ -1,6 +1,6 @@
 # Pandora FMS MCP Server
 
-An independent Model Context Protocol server for Pandora FMS / Pandora Open. It exposes 55 tools (33 read, 16 write, 6 admin) over two APIs:
+An independent Model Context Protocol server for Pandora FMS / Pandora Open. It exposes 55 tools (33 read, 14 write, 8 admin) over two APIs:
 
 - **API v2**: `{PANDORA_BASE_URL}/pandora_console/api/v2` (request bodies built from the console's swagger schemas).
 - **Legacy API**: `GET {PANDORA_BASE_URL}/pandora_console/include/api.php` (`op`, `op2`, `id`, `id2`, `other`, `other_mode=url_encode_separator_|`, `return_type=json`). The positional `other` fields are exposed as named tool inputs and joined with `|` in the order of the docblocks in `functions_api.php`. Any input value containing `|` is rejected.
@@ -41,12 +41,13 @@ MCP_TRANSPORT=stdio
 | `AUTH_MODE` | `env` (default) or `gateway` (HTTP only). |
 | `MCP_TRANSPORT` | `stdio` (default) or `http`. |
 | `MCP_HTTP_PORT` / `MCP_HTTP_HOST` | HTTP listen port / host (defaults 8080 / 127.0.0.1). |
-| `CONDUIT_S2S_SECRET` | Gateway service-to-service secret; required for HTTP unless `MCP_ALLOW_INSECURE_DEV=1` (loopback only). |
+| `CONDUIT_S2S_SECRET` | Gateway service-to-service secret; required for HTTP, at least 32 characters, known placeholders are rejected (startup fails). `MCP_ALLOW_INSECURE_DEV=1` permits an empty secret on loopback only. |
+| `MCP_ALLOWED_HOSTS` | Comma-separated extra `Host` header values (hostnames or bracketed IPv6, **no port**) accepted on every endpoint except `/health`, as DNS-rebinding protection. `localhost`, `127.0.0.1` and `[::1]` are always allowed. When set, or when bound to loopback / running without an S2S secret, other hosts get `403`. Entries with a port or unbracketed IPv6 log a warning and never match. |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, `error`. |
 
 ## Gateway mode
 
-With `MCP_TRANSPORT=http` and `AUTH_MODE=gateway`, every `POST /mcp` request must carry the per-user token in the `X-Pandora-Token` header (and a valid `X-Gateway-S2S` header). Requests without it get `401`; the environment token is never used as a fallback. `PANDORA_BASE_URL` still comes from the environment. `/health` is unauthenticated.
+With `MCP_TRANSPORT=http` and `AUTH_MODE=gateway`, every `POST /mcp` request must carry the per-user token in the `X-Pandora-Token` header (and a valid `X-Gateway-S2S` header). Requests without it get `401`; the environment token is never used as a fallback. `PANDORA_BASE_URL` still comes from the environment. `/health` is unauthenticated. `POST /mcp` bodies are limited to 1 MiB (`413` above that).
 
 ## Tools
 
@@ -97,14 +98,14 @@ Tools are tiered; `read` is the default. Tools marked `⚠ DESTRUCTIVE` change o
 | `pandora_alert_validate` | write | Validate (acknowledge) one alert of a module (legacy set/validate_alert). |
 | `pandora_alerts_validate_all` | write | Validate (acknowledge) ALL fired alerts the user can manage (legacy set/validate_all_alerts). |
 | `pandora_module_enable` | write | Enable a module, given agent and module name (legacy set/enable_module). |
-| `pandora_module_disable` | write | ⚠ DESTRUCTIVE Disable a module, given agent and module name; the module stops collecting data until re-enabled (legacy set/disable_module). |
+| `pandora_module_disable` | admin | ⚠ DESTRUCTIVE Disable a module, given agent and module name; the module stops collecting data until re-enabled (legacy set/disable_module). |
 | `pandora_module_alerts_enable` | write | Enable all the alerts of one module (legacy set/enable_module_alerts). |
-| `pandora_module_alerts_disable` | write | ⚠ DESTRUCTIVE Disable all the alerts of one module; no alerts will fire for it until re-enabled (legacy set/disable_module_alerts). |
+| `pandora_module_alerts_disable` | admin | ⚠ DESTRUCTIVE Disable all the alerts of one module; no alerts will fire for it until re-enabled (legacy set/disable_module_alerts). |
 | `pandora_agent_enabled_set` | write | Enable or disable an agent (legacy set/enable_disable_agent). disabled=true stops the agent from being monitored. |
 | `pandora_downtime_create` | write | Create a planned downtime (legacy set/planned_downtimes_created). Dates use MM-DD-YYYY, times HH:MM:SS. |
 | `pandora_downtime_agents_add` | write | Add agents to a planned downtime (legacy set/planned_downtimes_add_agents). |
 | `pandora_downtime_stop` | write | Stop a running planned downtime (legacy set/stop_downtime). |
-| `pandora_agent_field_update` | write | Update fields of an agent (legacy set/update_agent_field). Field names must not contain ","; no value may contain "\|". |
+| `pandora_agent_field_update` | write | Update fields of an agent (legacy set/update_agent_field). Neither field names nor values may contain ","; no value may contain "\|". |
 | `pandora_agent_delete` | admin | ⚠ DESTRUCTIVE Permanently delete an agent by name, with all its modules and data (legacy set/delete_agent). This cannot be undone. |
 | `pandora_module_delete` | admin | ⚠ DESTRUCTIVE Permanently delete a module and its data, given agent and module name (legacy set/delete_module). Use simulate=true for a dry run. This cannot be undone. |
 | `pandora_downtime_delete` | admin | ⚠ DESTRUCTIVE Permanently delete a planned downtime (legacy set/planned_downtimes_deleted). This cannot be undone. |

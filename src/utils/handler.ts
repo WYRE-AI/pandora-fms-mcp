@@ -46,6 +46,7 @@ function toTool(endpoint: EndpointSpec) {
 function toSchema(param: import("./types.js").ParamSpec): Record<string, unknown> {
   const schema: Record<string, unknown> = { type: param.type === "integer" ? "integer" : param.type };
   if (param.enum) schema.enum = param.enum;
+  if (param.pattern) schema.pattern = param.pattern;
   if (param.description) schema.description = param.description;
   if (param.minimum !== undefined) schema.minimum = param.minimum;
   if (param.maximum !== undefined) schema.maximum = param.maximum;

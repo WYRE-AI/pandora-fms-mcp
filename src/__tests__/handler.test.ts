@@ -13,17 +13,17 @@ beforeEach(() => {
 });
 
 describe("tool registry", () => {
-  it("lists exactly 33 read, 16 write and 6 admin tools (55 total)", () => {
+  it("lists exactly 33 read, 14 write and 8 admin tools (55 total)", () => {
     const tools = listTools(["read", "write", "admin"]);
     expect(tools).toHaveLength(55);
     expect(new Set(tools.map((tool) => tool.name)).size).toBe(55);
     const count = (tier: string) => Object.values(TOOL_TIERS).filter((info) => info.tier === tier).length;
     expect(count("read")).toBe(33);
-    expect(count("write")).toBe(16);
-    expect(count("admin")).toBe(6);
+    expect(count("write")).toBe(14);
+    expect(count("admin")).toBe(8);
     expect(listTools(["read"])).toHaveLength(33);
-    expect(listTools(["write"])).toHaveLength(16);
-    expect(listTools(["admin"])).toHaveLength(6);
+    expect(listTools(["write"])).toHaveLength(14);
+    expect(listTools(["admin"])).toHaveLength(8);
   });
 
   it("gives every tool a tier, a pandora_ name, and its API", () => {
