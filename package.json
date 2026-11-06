@@ -24,7 +24,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/asachs01/pandora-fms-mcp.git"
+    "url": "git+https://github.com/WYRE-AI/pandora-fms-mcp.git"
   },
   "keywords": [
     "mcp",
