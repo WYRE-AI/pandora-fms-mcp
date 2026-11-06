@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.WYRE-AI/pandora-fms-mcp",
+  "title": "Pandora FMS / Pandora Open",
+  "description": "MCP server for Pandora FMS / Pandora Open (API v2 and legacy api.php).",
+  "repository": {
+    "url": "https://github.com/WYRE-AI/pandora-fms-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "websiteUrl": "https://github.com/WYRE-AI/pandora-fms-mcp",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/wyre-ai/pandora-fms-mcp:0.0.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        { "name": "PANDORA_BASE_URL", "description": "Pandora console base URL (https)", "isRequired": true, "isSecret": false, "format": "string" },
+        { "name": "PANDORA_API_TOKEN", "description": "Per-user Pandora API token", "isRequired": true, "isSecret": true, "format": "string" },
+        { "name": "PANDORA_TOOL_TIERS", "description": "Tiers to expose: read, write, admin (default read)", "isRequired": false, "isSecret": false, "format": "string" }
+      ]
+    }
+  ]
+}

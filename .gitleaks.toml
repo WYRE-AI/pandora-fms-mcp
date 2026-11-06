@@ -1,0 +1,10 @@
+# Extend the default gitleaks rules. Only the specific, obviously fake fixture
+# values below are allowlisted (no path-wide allowlist), so a real secret added
+# anywhere, including tests and the smoke script, is still reported.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake Pandora token used only in mocked tests"
+regexTarget = "secret"
+regexes = ['''^tok-SECRET-0123456789$''']
