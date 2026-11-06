@@ -15,6 +15,8 @@
       "identifier": "ghcr.io/wyre-ai/pandora-fms-mcp:0.0.0",
       "transport": { "type": "stdio" },
       "environmentVariables": [
+        { "name": "MCP_TRANSPORT", "description": "Override the image's HTTP default so the container speaks stdio", "isRequired": true, "isSecret": false, "format": "string", "value": "stdio" },
+        { "name": "AUTH_MODE", "description": "Read Pandora credentials from PANDORA_* env vars instead of gateway headers", "isRequired": true, "isSecret": false, "format": "string", "value": "env" },
         { "name": "PANDORA_BASE_URL", "description": "Pandora console base URL (https)", "isRequired": true, "isSecret": false, "format": "string" },
         { "name": "PANDORA_API_TOKEN", "description": "Per-user Pandora API token", "isRequired": true, "isSecret": true, "format": "string" },
         { "name": "PANDORA_TOOL_TIERS", "description": "Tiers to expose: read, write, admin (default read)", "isRequired": false, "isSecret": false, "format": "string" }

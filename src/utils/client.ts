@@ -387,7 +387,13 @@ export async function execute(
     return errorResult("http", `Pandora returned an unexpected redirect (status ${response.status}); redirects are not followed.`);
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResult("network", redactSecrets(`Reading Pandora response (status ${response.status}) failed: ${message}`, secrets));
+  }
   let data: unknown;
   try {
     data = JSON.parse(text);
